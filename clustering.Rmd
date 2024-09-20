@@ -1,0 +1,630 @@
+---
+title: "Cluster Analysis"
+author: "Yamkela Kwakwi"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Load the libraries
+
+library(scatterplot3d)
+library(plotly)
+library(cluster)
+library(NbClust)
+library(fpc)
+library(mclust)
+library(factoextra)
+library(ggplot2)
+library(dendextend)
+library(dplyr)
+library(tidyr)
+library(knitr)
+
+
+#Read the raw data
+
+raw_data <- read.csv('fetal_health.csv', header = T, sep = ";")
+head(raw_data)
+summary(raw_data)
+
+#Count how many unique values each variable has 
+sapply(raw_data, function(x) length(unique(x)))
+
+table(raw_data$severe_decelerations) # severe has only two unique values, investigate these.
+
+```
+
+#Exploratory Data Analysis
+
+```{r}
+# Plot heatmap to visualize correlation 
+
+# Calculate the correlation matrix
+correlation_matrix <- cor(raw_data, use = "complete.obs")
+
+# Create a basic heatmap
+heatmap(correlation_matrix, 
+        Colv = NA,                # Disable column clustering
+        Rowv = NA,                # Disable row clustering
+        scale = "none",           # Disable scaling
+        col = colorRampPalette(c("blue", "white", "red"))(100),  # Colors
+        margins = c(10, 10))      # Adjust margins
+```
+
+```{r}
+#Select the variables to keep
+
+selected_data <- raw_data[,c("baseline.value", "accelerations", "fetal_movement", "uterine_contractions", "prolongued_decelerations", "abnormal_short_term_variability", "mean_value_of_short_term_variability", "mean_value_of_long_term_variability", "histogram_width",
+"histogram_variance", "histogram_tendency")]
+
+
+#Generate the statistics for the variables
+desc_stats <- data.frame(
+  Min = apply(selected_data, 2, min), # minimum
+  Med = apply(selected_data, 2, median), # median
+  Mean = apply(selected_data, 2, mean), # mean
+  SD = apply(selected_data, 2, sd), # Standard deviation
+  Max = apply(selected_data, 2, max) # Maximum
+  )
+desc_stats <- round(desc_stats, 4)
+head(desc_stats)
+
+# Generate a markdown-formatted table
+knitr::kable(desc_stats, format = "markdown")
+
+```
+
+```{r}
+#Plot histograms to show distribution of variables
+
+# Number of variables
+n_vars <- ncol(selected_data)
+
+# Define the layout 
+n_rows <- ceiling(n_vars / 3)
+n_cols <- 3
+
+# Set up the plotting area
+par(mfrow = c(n_rows, n_cols), mar = c(4, 4, 2, 1))  # Adjust margins as needed
+
+# Loop through each variable and create a histogram
+for (i in 1:n_vars) {
+  hist(selected_data[[i]], main = names(selected_data)[i], xlab = "", col = "blue", border = "black")
+}
+
+# Reset plotting layout to default
+par(mfrow = c(1, 1))
+```
+
+```{r}
+#Plot boxplots to visualise outliers
+
+# Reshape data into long format
+long_data <- pivot_longer(selected_data, cols = everything(), names_to = "variable", values_to = "value")
+
+# Create a boxplot for all variables
+
+ggplot(long_data, aes(x = variable, y = value))+
+  geom_boxplot(fill = "blue", color = "black")+
+  theme(axis.text.x = element_text(angle = 65, vjust = 1, hjust = 1))+
+  labs(x =  NULL, y = "Value")
+  
+
+```
+
+```{r}
+#Scale the data
+scaled_data <- scale(selected_data)
+head(scaled_data)
+
+#Convert back to dataframe
+scaled_data <- as.data.frame(scaled_data)
+
+#Get the statistics
+desc_stats_scaled <- data.frame(
+  Min = apply(scaled_data, 2, min), # minimum
+  Med = apply(scaled_data, 2, median), # median
+  Mean = apply(scaled_data, 2, mean), # mean
+  SD = apply(scaled_data, 2, sd), # Standard deviation
+  Max = apply(scaled_data, 2, max) # Maximum
+  )
+desc_stats_scaled <- round(desc_stats_scaled, 4)
+head(desc_stats_scaled)
+
+knitr::kable(desc_stats_scaled, format = "markdown")
+
+```
+
+```{r}
+#Plot boxplots to visualise outliers
+
+# Reshape data into long format
+long_data <- pivot_longer(scaled_data, cols = everything(), names_to = "variable", values_to = "value")
+
+# Create a boxplot for all variables
+
+ggplot(long_data, aes(x = variable, y = value))+
+  geom_boxplot(fill = "blue", color = "black")+
+  theme(axis.text.x = element_text(angle = 65, vjust = 1, hjust = 1))+
+  labs(x =  NULL, y = "Value")
+```
+
+```{r}
+#Run  PCA
+
+pca_fit <- princomp(scaled_data, cor = T, scores = T)
+
+#Calculate percentage variance
+pca_var <- pca_fit$sdev^2
+pca_var_percent <- pca_var / sum(pca_var) * 100
+
+# Get the scores for the first three PCs
+pca_scores <- pca_fit$scores
+
+```
+
+```{r}
+# PAM clustering
+pam_fit <- pam(scaled_data, k = 4)  # Replace 3 with the number of clusters after evaluation
+fviz_cluster(pam_fit, data = scaled_data)
+
+```
+
+```{r}
+#Elbow plot to further confirm the best k
+data_matr <- as.matrix(scaled_data)
+fviz_nbclust(data_matr, pam, method = "silhouette")
+```
+
+```{r}
+#Elbow plot to further confirm the best k
+data_matr <- as.matrix(scaled_data)
+fviz_nbclust(data_matr, pam, method = "wss")
+```
+
+```{r}
+# Compute WSS for k = 1 to 10
+wss_values <- sapply(1:10, function(k){
+  pam(data_matr, k = k, nstart = 25)$tot.withinss
+})
+
+# Print WSS values for each k
+
+```
+
+```{r}
+# Silhouette analysis to choose optimal k
+sil_pam <- silhouette(pam_fit$clustering, dist(scaled_data))
+fviz_silhouette(sil_pam)
+
+sil_kmeans <- silhouette(kmeans_fit$cluster, dist(scaled_data))
+fviz_silhouette(sil_pam)
+
+```
+
+```{r}
+#Visualize using PC
+pam_clusters <- pam_fit$clustering
+
+# Create a 3D PCA plot with PAM clusters
+plot_ly(x = pca_scores[, 1], y = pca_scores[, 2], z = pca_scores[, 3], 
+        type = 'scatter3d', mode = 'markers',
+        marker = list(size = 5, color = pam_clusters, colorscale = "Viridis")) %>%
+  layout(scene = list(
+    xaxis = list(title = paste0("PC1: ", round(pca_var_percent[1], 2), "% ")),
+    yaxis = list(title = paste0("PC2: ", round(pca_var_percent[2], 2), "% ")),
+    zaxis = list(title = paste0("PC3: ", round(pca_var_percent[3], 2), "% "))
+  ))
+
+
+```
+
+#Hierarchical Clustering
+
+```{r}
+#Choose best Hierarchical clustering method
+
+# List of hierarchical clustering methods to compare
+methods <- c("single", "complete", "average", "centroid", "ward.D2")
+
+# Create an empty dataframe to store the cophenetic correlation results
+coph_results <- data.frame(method = character(), cophenetic_corr = numeric())
+
+# Loop through each method and compute the cophenetic correlation
+for (method in methods) {
+  # Perform hierarchical clustering
+  hc <- hclust(dist(data_matr), method = method)
+  
+  # Compute the cophenetic correlation
+  coph_dist <- cophenetic(hc)
+  coph_corr <- cor(dist(data_matr), coph_dist)
+  
+  # Store the result
+  coph_results <- rbind(coph_results, data.frame(method = method, cophenetic_corr = coph_corr))
+}
+
+# Plot the Cophenetic Correlation for different clustering methods
+ggplot(coph_results, aes(x = method, y = cophenetic_corr, fill = method)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(cophenetic_corr, 3)), vjust = -0.5) +
+  labs( 
+       x = "Clustering Method", 
+       y = "Cophenetic Correlation Coefficient") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Perform Hierarchical Clustering 
+
+dist_matrix <- dist(data_matr)  # Compute the distance matrix
+
+hc_average <- hclust(dist_matrix, method = "average") # has hightest ccc
+
+# Plot Dendrogram
+plot(hc_average, main = "Average Linkage Dendrogram", xlab = "", sub = "")
+
+
+
+```
+
+```{r}
+#Visualize using PCs
+
+hc_clusters <- cutree(hc_average, 4)
+
+plot_ly(x = pca_scores[, 1], y = pca_scores[, 2], z = pca_scores[, 3], 
+        type = 'scatter3d', mode = 'markers',
+        marker = list(size = 5, color = hc_clusters, colorscale = "Viridis")) %>%
+  layout(scene = list(
+    xaxis = list(title = paste0("PC1: ", round(pca_var_percent[1], 2), "% ")),
+    yaxis = list(title = paste0("PC2: ", round(pca_var_percent[2], 2), "% ")),
+    zaxis = list(title = paste0("PC3: ", round(pca_var_percent[3], 2), "% "))
+  ))
+```
+
+
+```{r}
+table(hc_clusters)
+```
+
+#Mixture models
+
+```{r}
+pca_df <-  data.frame(pca_points <- pca_out$scores[, 1:3])
+d_clust <- Mclust(pca_df)
+plot(d_clust, data_matr, what = "BIC")
+```
+
+```{r}
+#Plot the mixture plot with 4 clusters
+
+d_clust4 <- Mclust(pca_df, G = 4)
+d_clusters <- d_clust4$classification
+
+# Create a 3D PCA plot with PAM clusters
+plot_ly(x = pca_scores[, 1], y = pca_scores[, 2], z = pca_scores[, 3], 
+        type = 'scatter3d', mode = 'markers',
+        marker = list(size = 5, color = d_clusters, colorscale = "Viridis")) %>%
+  layout(scene = list(
+    xaxis = list(title = paste0("PC1: ", round(pca_var_percent[1], 2), "% ")),
+    yaxis = list(title = paste0("PC2: ", round(pca_var_percent[2], 2), "% ")),
+    zaxis = list(title = paste0("PC3: ", round(pca_var_percent[3], 2), "% "))
+  ))
+```
+
+#Profiling
+
+```{r}
+clustered_data <- selected_data %>%
+  mutate(pam_cluster = pam_fit$clustering)
+
+list_of_clusters <- clustered_data %>%
+  group_split(pam_cluster)
+
+
+```
+
+```{r}
+table(pam_clusters)
+```
+
+
+## Heart rate
+
+```{r}
+# Select the relevant columns for the analysis
+HR_patterns <- clustered_data %>%
+  select(pam_cluster, accelerations, prolongued_decelerations, baseline.value)
+
+# Reshape the data to long format for easier plotting
+long_data <- HR_patterns %>%
+  pivot_longer(cols = -pam_cluster, names_to = "Variable", values_to = "Value")
+
+# Create the boxplot
+ggplot(long_data, aes(x = factor(pam_cluster), y = Value, fill = factor(pam_cluster))) +
+  geom_boxplot() +
+  facet_wrap(~ Variable, scales = "free", ncol = 2) +  # Separate plots for each variable
+  theme_minimal() +
+  labs(title = NULL,
+       x = NULL,
+       y = "Value",
+       fill = "Cluster")
+```
+
+## Fetal Movement and Uterine movement
+
+```{r}
+movements <- clustered_data %>%
+  select(pam_cluster,
+         fetal_movement, uterine_contractions)
+
+# Reshape the data to long format for easier plotting
+long_data <- movements %>%
+  pivot_longer(cols = -pam_cluster, names_to = "Variable", values_to = "Value")
+
+# Create the boxplot
+ggplot(long_data, aes(x = factor(pam_cluster), y = Value, fill = factor(pam_cluster))) +
+  geom_boxplot() +
+  facet_wrap(~ Variable, scales = "free", ncol = 1) +  # Separate plots for each variable
+  theme_minimal() +
+  labs(title = NULL,
+       x = NULL,
+       y = "Value",
+       fill = "Cluster")
+```
+
+##Heart rate variability
+
+```{r}
+HR_var <- clustered_data %>%
+  select(pam_cluster,abnormal_short_term_variability, mean_value_of_short_term_variability, mean_value_of_long_term_variability)
+
+# Reshape the data to long format for easier plotting
+long_data <- HR_var %>%
+  pivot_longer(cols = -pam_cluster, names_to = "Variable", values_to = "Value")
+
+# Create the boxplot
+ggplot(long_data, aes(x = factor(pam_cluster), y = Value, fill = factor(pam_cluster))) +
+  geom_boxplot() +
+  facet_wrap(~ Variable, scales = "free", ncol = 2) +  # Separate plots for each variable
+  theme_minimal() +
+  labs(title = NULL,
+       x = NULL,
+       y = "Value",
+       fill = "Cluster")
+```
+
+
+
+```{r}
+# Assign each cluster its own name (e.g., cluster_1, cluster_2, ...)
+for (i in seq_along(list_of_clusters)) {
+  assign(paste0("cluster_", i), list_of_clusters[[i]])
+}
+```
+
+
+#Cluster 1
+
+```{r}
+
+#Generate the statistics for the variables in cluster 1
+cluster1_stats <- data.frame(
+  Min = apply(cluster_1, 2, min), # minimum
+  Med = apply(cluster_1, 2, median), # median
+  Mean = apply(cluster_1, 2, mean), # mean
+  SD = apply(cluster_1, 2, sd), # Standard deviation
+  Max = apply(cluster_1, 2, max) # Maximum
+  )
+cluster1_stats <- round(cluster1_stats, 4)
+head(cluster1_stats)
+
+# Generate a markdown-formatted table
+knitr::kable(cluster1_stats, format = "markdown")
+
+
+
+```
+
+```{r}
+#Plot histograms to show distribution of variables
+
+# Number of variables
+cluster_1 <- cluster_1[, -ncol(cluster_1)]
+n_vars <- ncol(cluster_1)
+
+# Define the layout 
+n_rows <- ceiling(n_vars / 3)
+n_cols <- 3
+
+# Set up the plotting area
+par(mfrow = c(n_rows, n_cols), mar = c(4, 4, 2, 1))  # Adjust margins as needed
+
+# Loop through each variable and create a histogram
+
+for (i in 1:n_vars) {
+  hist(cluster_1[[i]], main = names(cluster_1)[i], xlab = "", col = "blue", border = "black")
+}
+
+# Reset plotting layout to default
+par(mfrow = c(1, 1))
+```
+
+```{r}
+#Plot boxplots to visualise outliers
+
+# Reshape data into long format
+long_data <- pivot_longer(selected_data, cols = everything(), names_to = "variable", values_to = "value")
+
+# Create a boxplot for all variables
+
+ggplot(long_data, aes(x = variable, y = value))+
+  geom_boxplot(fill = "blue", color = "black")+
+  theme(axis.text.x = element_text(angle = 65, vjust = 1, hjust = 1))+
+  labs(x =  NULL, y = "Value")
+```
+
+#Cluster 2
+
+```{r}
+#Generate the statistics for the variables in cluster 2
+
+cluster2_stats <- data.frame(
+  Min = apply(cluster_2, 2, min), # minimum
+  Med = apply(cluster_2, 2, median), # median
+  Mean = apply(cluster_2, 2, mean), # mean
+  SD = apply(cluster_2, 2, sd), # Standard deviation
+  Max = apply(cluster_2, 2, max) # Maximum
+  )
+cluster2_stats <- round(cluster2_stats, 4)
+head(cluster2_stats)
+
+# Generate a markdown-formatted table
+knitr::kable(cluster2_stats, format = "markdown")
+```
+
+```{r}
+#Plot histograms to show distribution of variables
+
+# Number of variables
+cluster_2 <- cluster_2[, -ncol(cluster_2)]
+n_vars <- ncol(cluster_2)
+
+# Define the layout 
+n_rows <- ceiling(n_vars / 3)
+n_cols <- 3
+
+# Set up the plotting area
+par(mfrow = c(n_rows, n_cols), mar = c(4, 4, 2, 1))  # Adjust margins as needed
+
+# Loop through each variable and create a histogram
+
+for (i in 1:n_vars) {
+  hist(cluster_2[[i]], main = names(cluster_2)[i], xlab = "", col = "blue", border = "black")
+}
+
+# Reset plotting layout to default
+par(mfrow = c(1, 1))
+```
+
+#Cluster 3
+
+```{r}
+#Generate the statistics for the variables in cluster 3
+
+cluster3_stats <- data.frame(
+  Min = apply(cluster_3, 2, min), # minimum
+  Med = apply(cluster_3, 2, median), # median
+  Mean = apply(cluster_3, 2, mean), # mean
+  SD = apply(cluster_3, 2, sd), # Standard deviation
+  Max = apply(cluster_3, 2, max) # Maximum
+  )
+cluster3_stats <- round(cluster3_stats, 4)
+head(cluster3_stats)
+
+# Generate a markdown-formatted table
+knitr::kable(cluster3_stats, format = "markdown")
+```
+
+```{r}
+#Plot histograms to show distribution of variables
+
+# Number of variables
+cluster_3 <- cluster_3[, -ncol(cluster_3)]
+n_vars <- ncol(cluster_3)
+
+# Define the layout 
+n_rows <- ceiling(n_vars / 3)
+n_cols <- 3
+
+# Set up the plotting area
+par(mfrow = c(n_rows, n_cols), mar = c(4, 4, 2, 1))  # Adjust margins as needed
+
+# Loop through each variable and create a histogram
+
+for (i in 1:n_vars) {
+  hist(cluster_3[[i]], main = names(cluster_3)[i], xlab = "", col = "blue", border = "black")
+}
+
+# Reset plotting layout to default
+par(mfrow = c(1, 1))
+```
+
+#Cluster 4
+
+```{r}
+#Generate the statistics for the variables in cluster 4
+
+cluster4_stats <- data.frame(
+  Min = apply(cluster_4, 2, min), # minimum
+  Med = apply(cluster_4, 2, median), # median
+  Mean = apply(cluster_4, 2, mean), # mean
+  SD = apply(cluster_4, 2, sd), # Standard deviation
+  Max = apply(cluster_4, 2, max) # Maximum
+  )
+cluster4_stats <- round(cluster4_stats, 4)
+head(cluster4_stats)
+
+# Generate a markdown-formatted table
+knitr::kable(cluster4_stats, format = "markdown")
+```
+
+```{r}
+cluster_4 <- cluster_4[, -ncol(cluster_4)]
+
+# Set up the plotting area
+par(mfrow = c(n_rows, n_cols), mar = c(4, 4, 2, 1))  # Adjust margins as needed
+
+# Loop through each variable and create a histogram
+
+for (i in 1:n_vars) {
+  hist(cluster_4[[i]], main = names(cluster_4)[i], xlab = "", col = "blue", border = "black")
+}
+
+# Reset plotting layout to default
+par(mfrow = c(1, 1))
+```
+
+```{r}
+# Add cluster information to each dataframe
+cluster_1$Cluster <- "Cluster 1"
+cluster_2$Cluster <- "Cluster 2"
+cluster_3$Cluster <- "Cluster 3"
+cluster_4$Cluster <- "Cluster 4"
+
+# Combine the dataframes into one
+combined_data <- bind_rows(cluster_1, cluster_2, cluster_3, cluster_4)
+
+# Select only the variables of interest
+variables_of_interest <- combined_data %>%
+  select(Cluster, baseline.value, abnormal_short_term_variability, histogram_width, histogram_variance)
+
+# Pivot the data to a long format for easier plotting
+long_data <- variables_of_interest %>%
+  pivot_longer(cols = -Cluster, names_to = "Variable", values_to = "Value")
+
+# Plot the boxplots
+ggplot(long_data, aes(x = Cluster, y = Value, fill = Cluster)) +
+  geom_boxplot() +
+  facet_wrap(~ Variable, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Comparison of Variables Across Clusters",
+       x = "Cluster",
+       y = "Value")
+```
+
+
+```{r}
+
+sum(duplicated(scaled_data))
+scaled_data_unique <- scaled_data[!duplicated(scaled_data), ]
+tsne_results <- Rtsne(scaled_data_unique, dims = 2, perplexity = 30) # you can adjust the perplexity
+plot(tsne_results$Y, col = pam_fit$clustering, pch = 19, xlab = "t-SNE 1", ylab = "t-SNE 2")
+
+```
